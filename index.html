@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kamera App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kanit:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background-color: #000000;
+            position: relative; /* Notwendig für das absolute Positionieren der Buttons */
+            overflow: hidden;
+        
+        }
+
+        
+        .container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            position: relative; /* Position für die Buttons */
+        }
+
+        .active {
+            display: flex;
+        }
+
+        .svg {
+           
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-top: 20px;
+        }
+
+        #videoElement, #photo {
+            max-width: 100%;
+            max-height: 60vh;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            position: relative; /* Position für die Buttons */
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        /* Styles für die transparenten Buttons */
+        .button {
+            position: absolute;
+            background: none;
+            border: none;
+            cursor: pointer;
+            outline: none;
+        }
+
+        /* Positionierung der Buttons */
+        #toggleFlash {
+            top: 10%;
+            left: 10%;
+        }
+
+        #switchCamera {
+            top: 10%;
+            right: 10%;
+        }
+
+        #takePhoto {
+            bottom: 10%;
+            left: 50%;
+            transform: translateX(-50%); /* Zentrieren */
+        }
+
+        #photoControls {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        #photoControls button {
+            margin: 0 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #2d002f;
+            color: white;
+            transition: background-color 0.3s;
+        }
+
+        #photoControls button:hover {
+            background-color: #28002d;
+        }
+
+        #permissionModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        #permissionModalContent {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 90%;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Simulierter Blitz */
+        #flashOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s ease-in-out;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div id="status" style="text-align:center; margin-bottom: 20px;">Bitte erlaube den Zugriff auf die Kamera.</div>
+    <div id="previewContainer" class="container active">
+        <video id="videoElement" autoplay playsinline></video>
+        <button id="toggleFlash" class="button">
+            <img src="flash.svg" alt="Blitz" style="width: 50px; height: 50px; filter: invert(.95);">
+        </button>
+        <button id="switchCamera" class="button">
+            <img src="change.svg" alt="Kamera wechseln" style="width: 50px; height: 50px; filter: invert(.95);">
+        </button>
+        <button id="takePhoto" class="button">
+            <img src="circle.svg" alt="Foto machen" style="width: 50px; height: 50px; filter: invert(.95);">
+        </button>
+    </div>
+
+    <div id="photoContainer" class="container">
+        <img id="photo" alt="Ihr Foto" />
+        <div id="photoControls">
+            <button id="retakePhoto">Erneut aufnehmen</button>
+            <button id="shareButton">Teilen</button>
+        </div>
+    </div>
+
+    <div id="permissionModal">
+        <div id="permissionModalContent">
+            <h2 style="color: red;">Activate Camera!</h2>
+            <button id="grantPermissionButton" style="margin: 0 10px; padding: 10px 20px; font-size: 16px; border: none; border-radius: 5px; color: red;">Kamera erlauben</button>
+        </div>
+    </div>
+
+    <div id="flashOverlay"></div>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const previewContainer = document.getElementById('previewContainer');
+        const photoContainer = document.getElementById('photoContainer');
+        const photo = document.getElementById('photo');
+        const shareButton = document.getElementById('shareButton');
+        const retakeButton = document.getElementById('retakePhoto');
+        const permissionModal = document.getElementById('permissionModal');
+        const grantPermissionButton = document.getElementById('grantPermissionButton');
+        const flashOverlay = document.getElementById('flashOverlay');
+
+        let currentStream = null;
+        let useFrontCamera = true;
+        let flashOn = false;
+
+        async function checkPermissions() {
+            if (navigator.permissions) {
+                try {
+                    const permissionStatus = await navigator.permissions.query({ name: 'camera' });
+                    handlePermissionStatus(permissionStatus.state);
+                    permissionStatus.onchange = () => {
+                        handlePermissionStatus(permissionStatus.state);
+                    };
+                } catch (err) {
+                    console.warn('Permissions API nicht unterstützt oder Fehler:', err);
+                    showPermissionModal();
+                }
+            } else {
+                console.warn('Permissions API wird vom Browser nicht unterstützt.');
+                showPermissionModal();
+            }
+        }
+
+        function handlePermissionStatus(status) {
+            if (status === 'granted') {
+                statusDiv.textContent = '';
+                startCamera();
+            } else if (status === 'denied') {
+                statusDiv.textContent = 'Zugriff auf die Kamera wurde verweigert. Bitte ändere die Einstellungen deines Browsers.';
+                showPermissionModal();
+            } else {
+                statusDiv.textContent = 'Bitte erlaube den Zugriff auf die Kamera.';
+                showPermissionModal();
+            }
+        }
+
+        function showPermissionModal() {
+            permissionModal.style.display = 'flex';
+        }
+
+        function hidePermissionModal() {
+            permissionModal.style.display = 'none';
+        }
+
+        async function startCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusDiv.textContent = 'getUserMedia wird von diesem Browser nicht unterstützt.';
+                return;
+            }
+
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                const constraints = {
+                    video: {
+                        facingMode: useFrontCamera ? 'user' : 'environment',
+                    }
+                };
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = currentStream;
+                statusDiv.textContent = '';
+                hidePermissionModal();
+            } catch (err) {
+                console.error('Kamera-Zugriff fehlgeschlagen:', err);
+                if (err.name === 'NotAllowedError') {
+                    statusDiv.textContent = 'Zugriff auf die Kamera wurde verweigert. Bitte ändere die Einstellungen deines Browsers.';
+                } else if (err.name === 'NotFoundError') {
+                    statusDiv.textContent = 'Keine Kamera gefunden.';
+                } else {
+                    statusDiv.textContent = 'Ein unbekannter Fehler ist aufgetreten.';
+                }
+                showPermissionModal();
+            }
+        }
+
+        document.getElementById('takePhoto').addEventListener('click', () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Debugging: Ausgabe des Kamerastatus
+    console.log('Using Front Camera:', useFrontCamera);
+    console.log('Flash Status:', flashOn);
+
+    // Blitz einblenden nur wenn die Frontkamera verwendet wird
+    if (flashOn && !useFrontCamera) {
+        flashOverlay.style.opacity = 1;
+        setTimeout(() => {
+            flashOverlay.style.opacity = 0;
+        }, 100);
+        toggleTorch(true);
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dateString = new Date().toLocaleTimeString();
+
+    context.font = '700 50px Kanit';
+    context.fillStyle = 'white';
+    context.strokeStyle = 'black';
+    context.lineWidth = 2;
+
+    let textWidth = context.measureText(dateString).width;
+    let xPosition = (canvas.width / 2) - (textWidth / 2);
+    let yPosition = canvas.height * 0.1;
+
+    context.strokeText(dateString, xPosition, yPosition);
+    context.fillText(dateString, xPosition, yPosition);
+
+    context.font = '30px Kanit'; // Small font size
+const kasaiText = 'Kasai Photo';
+textWidth = context.measureText(kasaiText).width;
+xPosition = (canvas.width / 2) - (textWidth / 2);
+yPosition = canvas.height - 10; // Adjust as necessary for positioning
+
+context.strokeText(kasaiText, xPosition, yPosition);
+context.fillText(kasaiText, xPosition, yPosition);
+
+
+    photo.src = canvas.toDataURL();
+    previewContainer.classList.remove('active');
+    photoContainer.classList.add('active');
+    flashOverlay.style.opacity = flashOn ? 0.0 : 0;
+});
+
+
+
+
+        retakeButton.addEventListener('click', () => {
+            photoContainer.classList.remove('active');
+            previewContainer.classList.add('active');
+        });
+
+        shareButton.addEventListener('click', async () => {
+            const photoSrc = photo.src;
+            try {
+                const response = await fetch(photoSrc);
+                const blob = await response.blob();
+                const file = new File([blob], 'foto.png', { type: 'image/png' });
+
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: 'Mein Foto',
+                        files: [file]
+                    });
+                    console.log('Foto erfolgreich geteilt');
+                } else {
+                    alert('Teilen von Dateien wird von diesem Browser nicht unterstützt.');
+                }
+            } catch (error) {
+                console.error('Fehler beim Teilen:', error);
+                alert('Fehler beim Teilen des Fotos.');
+            }
+        });
+
+        document.getElementById('toggleFlash').addEventListener('click', () => {
+            flashOn = !flashOn;
+            flashOverlay.style.opacity = flashOn ? 0.7 : 0;
+            if (!useFrontCamera) {
+                toggleTorch(flashOn);
+                flashOverlay.style.opacity = flashOn ? 0.0 : 0;
+            }
+            
+        });
+
+        async function toggleTorch(state) {
+            const videoTracks = currentStream.getVideoTracks();
+            if (videoTracks.length > 0) {
+                const track = videoTracks[0];
+                await track.applyConstraints({
+                    advanced: [{ torch: state }]
+                });
+            }
+        }
+
+        document.getElementById('switchCamera').addEventListener('click', () => {
+    useFrontCamera = !useFrontCamera;
+    console.log('Switched to Front Camera:', useFrontCamera);
+    startCamera();
+});
+
+
+        checkPermissions();
+
+        grantPermissionButton.addEventListener('click', async () => {
+            hidePermissionModal();
+            await startCamera();
+        });
+    </script>
+</body>
+</html>
